@@ -1,7 +1,7 @@
-# Polyglot Android SDK
+# StringCast Android SDK
 
 Over-the-air localization for Android apps. Strings, plurals and string arrays published in
-Polyglot replace the compiled `strings.xml` values at runtime — no app update needed.
+StringCast replace the compiled `strings.xml` values at runtime — no app update needed.
 
 - Kotlin, minSdk 21, dependencies: `kotlinx-coroutines-android`, `androidx.core` (HTTP via
   `HttpURLConnection`, JSON via `org.json`).
@@ -9,15 +9,15 @@ Polyglot replace the compiled `strings.xml` values at runtime — no app update 
 
 ```
 sdk-android/
-  polyglot/   the library (:polyglot → polyglot-release.aar)
+  stringcast/   the library (:stringcast → stringcast-release.aar)
   sample/     demo app (:sample) against the local backend
 ```
 
 ## Build
 
 ```bash
-./gradlew :polyglot:testDebugUnitTest :polyglot:assembleRelease :sample:assembleDebug
-# AAR: polyglot/build/outputs/aar/polyglot-release.aar
+./gradlew :stringcast:testDebugUnitTest :stringcast:assembleRelease :sample:assembleDebug
+# AAR: stringcast/build/outputs/aar/stringcast-release.aar
 ```
 
 `local.properties` must point at your Android SDK (`sdk.dir=…`). JDK 17.
@@ -25,7 +25,7 @@ sdk-android/
 Optional contract check against a running backend (skipped unless the variable is set):
 
 ```bash
-POLYGLOT_LIVE_URL=http://localhost:8787 ./gradlew :polyglot:testDebugUnitTest --tests '*LiveBackendTest*'
+STRINGCAST_LIVE_URL=http://localhost:8787 ./gradlew :stringcast:testDebugUnitTest --tests '*LiveBackendTest*'
 ```
 
 ## Install
@@ -34,12 +34,12 @@ Until it is published to a Maven repository, include the module or the AAR:
 
 ```kotlin
 // settings.gradle.kts
-include(":polyglot")
-project(":polyglot").projectDir = file("../polyglot/sdk-android/polyglot")
+include(":stringcast")
+project(":stringcast").projectDir = file("../stringcast/sdk-android/stringcast")
 
 // app/build.gradle.kts
-dependencies { implementation(project(":polyglot")) }
-// or: implementation(files("libs/polyglot-release.aar")) + kotlinx-coroutines-android + androidx.core
+dependencies { implementation(project(":stringcast")) }
+// or: implementation(files("libs/stringcast-release.aar")) + kotlinx-coroutines-android + androidx.core
 ```
 
 The library's manifest adds `android.permission.INTERNET`.
@@ -50,9 +50,9 @@ The library's manifest adds `android.permission.INTERNET`.
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        Polyglot.init(
+        StringCast.init(
             this,
-            PolyglotConfig(
+            StringCastConfig(
                 projectId = "p_8f3k2j",
                 sdkKey = "pk_…",                    // public SDK key, never the sk_ upload key
                 baseUrl = "https://api.example.com", // API origin, without /v1
@@ -78,7 +78,7 @@ is the easiest place):
 ```kotlin
 open class BaseActivity : Activity() {   // or AppCompatActivity
     override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(Polyglot.wrap(newBase))
+        super.attachBaseContext(StringCast.wrap(newBase))
     }
 }
 ```
@@ -88,7 +88,7 @@ e.g. notifications or WorkManager):
 
 ```kotlin
 class App : Application() {
-    override fun attachBaseContext(base: Context) = super.attachBaseContext(Polyglot.wrap(base))
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(StringCast.wrap(base))
 }
 ```
 
@@ -105,13 +105,13 @@ Layout inflation reads `android:text` through `TypedArray`, which does **not** g
 `Resources.getText`. The wrapped context therefore also returns a `LayoutInflater` that observes
 every view created from XML (including through AppCompat's view factory) and applies the OTA
 value. Views remember their resource ids, so after an update you can either `recreate()` or call
-`Polyglot.localizeViewTree(window.decorView)`.
+`StringCast.localizeViewTree(window.decorView)`.
 
 Not covered automatically: `app:title`-style custom attributes, menu XML, the activity label from
 the manifest, strings set via styles/themes, and (on API < 29 only) fully-qualified custom views
 inside a themed (`android:theme`) sub-tree when no AppCompat-style factory is installed. For
-those use `Polyglot.getString("key")` / `resources.getString(R.string.key)` in code, or tag a
-TextView with `android:tag="polyglot:<key>"` and call `Polyglot.localizeViewTree(root)`.
+those use `StringCast.getString("key")` / `resources.getString(R.string.key)` in code, or tag a
+TextView with `android:tag="stringcast:<key>"` and call `StringCast.localizeViewTree(root)`.
 
 Styled strings: if the compiled string is styled (`<b>` in strings.xml) and the OTA value contains
 simple HTML tags, `getText` renders them as spans (`HtmlCompat`); otherwise values are literal.
@@ -119,18 +119,18 @@ simple HTML tags, `getText` renders them as spans (`HtmlCompat`); otherwise valu
 ## Key-based API
 
 ```kotlin
-Polyglot.getString("welcome_title")
-Polyglot.getString("greeting", userName)               // formatted like Resources.getString(id, args)
-Polyglot.getQuantityString("items_count", n, n)        // like Resources.getQuantityString
-Polyglot.getStringArray("planets")
+StringCast.getString("welcome_title")
+StringCast.getString("greeting", userName)               // formatted like Resources.getString(id, args)
+StringCast.getQuantityString("items_count", n, n)        // like Resources.getQuantityString
+StringCast.getStringArray("planets")
 
-Polyglot.currentLanguage        // resolved language in use, e.g. "es"
-Polyglot.currentVersion         // release version in use
-Polyglot.availableLanguages     // from the manifest
-Polyglot.setLanguage("fr")      // persisted; null = back to device languages
-Polyglot.refresh(force = true)  // check for a new release now
+StringCast.currentLanguage        // resolved language in use, e.g. "es"
+StringCast.currentVersion         // release version in use
+StringCast.availableLanguages     // from the manifest
+StringCast.setLanguage("fr")      // persisted; null = back to device languages
+StringCast.refresh(force = true)  // check for a new release now
 
-Polyglot.addUpdateListener { update -> recreate() }   // main thread; remove in onStop
+StringCast.addUpdateListener { update -> recreate() }   // main thread; remove in onStop
 ```
 
 Lookup order (contract §6.5): resolved-language bundle → base-language bundle → the app's
@@ -142,7 +142,7 @@ errors never throw; the unformatted value is returned and a warning is logged.
 
 ## How the language is resolved
 
-Exactly contract §6.4. `setLanguage(...)` (persisted) beats `PolyglotConfig.languageOverride`,
+Exactly contract §6.4. `setLanguage(...)` (persisted) beats `StringCastConfig.languageOverride`,
 which beats the device. Otherwise the device's preferred languages (`LocaleList.getDefault()` on
 API 24+, `Locale.getDefault()` below) are tried in order; for each:
 
@@ -156,8 +156,8 @@ First hit wins; otherwise the project's `baseLanguage`. Tags compare case-insens
 
 ## Updates, caching and threading
 
-- Cache: `filesDir/polyglot/manifest.json` and `filesDir/polyglot/bundles/<lang>.json`; every
-  write is temp file + fsync + rename. The ETag lives in SharedPreferences `dev.polyglot.sdk`.
+- Cache: `filesDir/stringcast/manifest.json` and `filesDir/stringcast/bundles/<lang>.json`; every
+  write is temp file + fsync + rename. The ETag lives in SharedPreferences `dev.stringcast.sdk`.
 - On `init` (and when an Activity starts, at most every `refreshIntervalMs`) the manifest is
   fetched with `If-None-Match`. On a new version the resolved-language and base-language bundles
   are downloaded, verified (`sha256-<base64>` hash of the raw body, version, language, projectId),
@@ -167,7 +167,7 @@ First hit wins; otherwise the project's `baseLanguage`. Tags compare case-insens
   from any thread. Network work runs on `Dispatchers.IO`, serialised by a mutex.
 - Bundle URLs pointing at `localhost`/`127.0.0.1` are re-pointed at the configured `baseUrl`
   host so a device/emulator can reach a local backend.
-- All network, disk and parse errors are logged (tag `Polyglot`) and swallowed.
+- All network, disk and parse errors are logged (tag `StringCast`) and swallowed.
 
 ## Draft mode
 
@@ -178,11 +178,11 @@ First hit wins; otherwise the project's `baseLanguage`. Tags compare case-insens
   from the app's base-language (`values/`) resources. Only the app's own resources are reported
   (framework and library strings such as `abc_*` are filtered out); keys without a local value
   are not reported. The server never overwrites existing keys.
-- **`Polyglot.uploadLocalStrings()`** uploads every entry of the app's `R.string`, `R.plurals`
+- **`StringCast.uploadLocalStrings()`** uploads every entry of the app's `R.string`, `R.plurals`
   and `R.array` (base-language values) in batches of ≤ 500:
 
   ```kotlin
-  Polyglot.uploadLocalStrings(R::class.java) { result ->
+  StringCast.uploadLocalStrings(R::class.java) { result ->
       Log.i("App", "uploaded ${result.total}: ${result.created} new, ${result.ignored} existing, error=${result.error}")
   }
   ```
@@ -198,17 +198,17 @@ Pushing `strings.xml` from CI or Gradle is done by the Node CLI in `cli/`, not b
 
 ```kotlin
 // app/build.gradle.kts
-tasks.register<Exec>("polyglotPush") {
-    group = "polyglot"
+tasks.register<Exec>("stringcastPush") {
+    group = "stringcast"
     workingDir = projectDir
-    commandLine("npx", "polyglot", "push", "--platform", "android", "--res", "src/main/res")
+    commandLine("npx", "stringcast", "push", "--platform", "android", "--res", "src/main/res")
 }
-// optionally: tasks.named("preBuild") { dependsOn("polyglotPush") }  (CI only — needs network)
+// optionally: tasks.named("preBuild") { dependsOn("stringcastPush") }  (CI only — needs network)
 ```
 
-The task inherits the environment, so set `POLYGLOT_UPLOAD_KEY` (`sk_…`), `POLYGLOT_PROJECT_ID`
-and `POLYGLOT_BASE_URL` (or use the CLI's config file / flags). See `cli/README.md`.
-`./gradlew :sample:polyglotPush` is a working example.
+The task inherits the environment, so set `STRINGCAST_UPLOAD_KEY` (`sk_…`), `STRINGCAST_PROJECT_ID`
+and `STRINGCAST_BASE_URL` (or use the CLI's config file / flags). See `cli/README.md`.
+`./gradlew :sample:stringcastPush` is a working example.
 
 ## ProGuard / R8
 

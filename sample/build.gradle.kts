@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.polyglot.sample"
+    namespace = "dev.stringcast.sample"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.polyglot.sample"
+        applicationId = "dev.stringcast.sample"
         minSdk = 21
         targetSdk = 36
         versionCode = 1
@@ -33,14 +33,14 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":polyglot"))
+    implementation(project(":stringcast"))
 }
 
-// Example: push the app's strings.xml to Polyglot before building (requires the Node CLI).
-// Not wired into the build by default; run with `./gradlew :sample:polyglotPush`.
-tasks.register<Exec>("polyglotPush") {
-    group = "polyglot"
-    description = "Uploads src/main/res string files with the polyglot CLI"
+// Example: push the app's strings.xml to StringCast before building (requires the Node CLI).
+// Not wired into the build by default; run with `./gradlew :sample:stringcastPush`.
+tasks.register<Exec>("stringcastPush") {
+    group = "stringcast"
+    description = "Uploads src/main/res string files with the stringcast CLI"
     workingDir = projectDir
-    commandLine("npx", "polyglot", "push", "--platform", "android", "--res", "src/main/res")
+    commandLine("npx", "stringcast", "push", "--platform", "android", "--res", "src/main/res")
 }

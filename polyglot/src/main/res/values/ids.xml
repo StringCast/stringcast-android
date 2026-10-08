@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- View tags used by Polyglot to remember which string resource a view was inflated with. -->
-    <item name="polyglot_text_res" type="id" />
-    <item name="polyglot_hint_res" type="id" />
-    <item name="polyglot_content_description_res" type="id" />
-</resources>

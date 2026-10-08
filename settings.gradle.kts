@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "polyglot-android"
-include(":polyglot", ":sample")
+rootProject.name = "stringcast-android"
+include(":stringcast", ":sample")

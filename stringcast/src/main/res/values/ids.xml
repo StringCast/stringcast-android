@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- View tags used by StringCast to remember which string resource a view was inflated with. -->
+    <item name="stringcast_text_res" type="id" />
+    <item name="stringcast_hint_res" type="id" />
+    <item name="stringcast_content_description_res" type="id" />
+</resources>
