@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Polyglot Sample</string>
+    <string name="welcome_title">Welcome!</string>
+    <string name="welcome_body">These texts are updated over the air by Polyglot. Publish a new release in the portal and tap Refresh.</string>
+    <string name="cta_refresh">Refresh</string>
+    <string name="language_label">Language</string>
+    <string name="language_system">System</string>
+    <string name="status_format">Release v%1$d · language %2$s</string>
+    <plurals name="items_count">
+        <item quantity="one">%d item in your cart</item>
+        <item quantity="other">%d items in your cart</item>
+    </plurals>
+</resources>
