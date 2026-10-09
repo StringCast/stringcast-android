@@ -5,7 +5,7 @@ StringCast replace the compiled `strings.xml` values at runtime — no app updat
 
 - Kotlin, minSdk 21, dependencies: `kotlinx-coroutines-android`, `androidx.core` (HTTP via
   `HttpURLConnection`, JSON via `org.json`).
-- Implements the runtime behaviour of `docs/CONTRACT.md` §6.
+- Full guide: https://console.stringcast.app/docs/android
 
 ```
 sdk-android/
@@ -30,16 +30,28 @@ STRINGCAST_LIVE_URL=http://localhost:8787 ./gradlew :stringcast:testDebugUnitTes
 
 ## Install
 
-Until it is published to a Maven repository, include the module or the AAR:
+The SDK is published to Maven Central as `app.stringcast:stringcast-android`
+(`mavenCentral()` is already in the default repositories of new Android projects):
+
+```kotlin
+// app/build.gradle.kts
+dependencies {
+    implementation("app.stringcast:stringcast-android:0.1.0")
+}
+```
+
+The Kotlin package is `app.stringcast.sdk` (`import app.stringcast.sdk.StringCast`,
+`import app.stringcast.sdk.StringCastConfig`).
+
+To build against a local checkout instead, include the module:
 
 ```kotlin
 // settings.gradle.kts
 include(":stringcast")
-project(":stringcast").projectDir = file("../stringcast/sdk-android/stringcast")
+project(":stringcast").projectDir = file("../stringcast-android/stringcast")
 
 // app/build.gradle.kts
 dependencies { implementation(project(":stringcast")) }
-// or: implementation(files("libs/stringcast-release.aar")) + kotlinx-coroutines-android + androidx.core
 ```
 
 The library's manifest adds `android.permission.INTERNET`.
@@ -157,7 +169,7 @@ First hit wins; otherwise the project's `baseLanguage`. Tags compare case-insens
 ## Updates, caching and threading
 
 - Cache: `filesDir/stringcast/manifest.json` and `filesDir/stringcast/bundles/<lang>.json`; every
-  write is temp file + fsync + rename. The ETag lives in SharedPreferences `dev.stringcast.sdk`.
+  write is temp file + fsync + rename. The ETag lives in SharedPreferences `app.stringcast.sdk`.
 - On `init` (and when an Activity starts, at most every `refreshIntervalMs`) the manifest is
   fetched with `If-None-Match`. On a new version the resolved-language and base-language bundles
   are downloaded, verified (`sha256-<base64>` hash of the raw body, version, language, projectId),

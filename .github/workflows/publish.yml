@@ -1,0 +1,51 @@
+name: Publish to Maven Central
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # Until the Maven Central secrets are added, tags still build and test (and JitPack serves them).
+      HAS_CREDENTIALS: ${{ secrets.MAVEN_CENTRAL_USERNAME != '' && secrets.SIGNING_IN_MEMORY_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Check tag matches VERSION_NAME
+        run: |
+          version=$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION_NAME=$version in gradle.properties"
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon :stringcast:testDebugUnitTest
+
+      - name: Publish and release to Maven Central
+        if: ${{ env.HAS_CREDENTIALS == 'true' }}
+        run: ./gradlew --no-daemon publishAndReleaseToMavenCentral --no-configuration-cache
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+
+      - name: Maven Central credentials missing
+        if: ${{ env.HAS_CREDENTIALS != 'true' }}
+        run: echo "::warning::MAVEN_CENTRAL_* / SIGNING_* secrets are not set — skipped Maven Central publish (see RELEASING.md)."

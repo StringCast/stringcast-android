@@ -1,0 +1,5 @@
+# JitPack builds tags from this repo: com.github.StringCast:stringcast-android:<tag>
+jdk:
+  - openjdk17
+install:
+  - ./gradlew :stringcast:publishToMavenLocal --no-configuration-cache

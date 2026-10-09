@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.stringcast.sample"
+    namespace = "app.stringcast.sample"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.stringcast.sample"
+        applicationId = "app.stringcast.sample"
         minSdk = 21
         targetSdk = 36
         versionCode = 1
