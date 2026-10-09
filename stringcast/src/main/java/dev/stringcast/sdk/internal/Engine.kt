@@ -52,7 +52,17 @@ internal class Engine(
     val app: Context = context.applicationContext ?: context
     private val cache = DiskCache(app.filesDir)
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val http = Http(config.sdkKey, "stringcast-android/${BuildConfig.SDK_VERSION}")
+    private val appId: String? = try { app.packageName } catch (t: Throwable) { null }
+    private val appVersion: String? = CheckInHeaders.appVersionName(app)
+    private val http = Http(config.sdkKey, "stringcast-android/${BuildConfig.SDK_VERSION}") {
+        CheckInHeaders.build(
+            appId = appId,
+            appVersion = appVersion,
+            sdkVersion = BuildConfig.SDK_VERSION,
+            // Resolved at request time so setLanguage()/languageOverride are respected (§6.4).
+            language = resolveLanguage(state.manifest).ifEmpty { null },
+        )
+    }
     private val apiBase: String = normalizeBaseUrl(config.baseUrl)
     private val sdkBase = "$apiBase/v1/sdk/${config.projectId}"
     private val mainHandler = Handler(Looper.getMainLooper())

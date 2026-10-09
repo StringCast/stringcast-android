@@ -5,7 +5,8 @@ package dev.stringcast.sdk
  *
  * @property projectId StringCast project id, e.g. `p_8f3k2j`.
  * @property sdkKey public SDK key (`pk_…`). Never put an upload key (`sk_…`) in an app.
- * @property baseUrl API origin without `/v1`, e.g. `https://api.example.com` or `http://10.0.2.2:8787`.
+ * @property baseUrl API origin without `/v1`. Default [DEFAULT_BASE_URL] (`https://console.stringcast.app`);
+ *   e.g. `http://10.0.2.2:8787` for a local backend from the emulator.
  * @property languageOverride forces a language (beats the device languages). [StringCast.setLanguage]
  *   at runtime beats this value.
  * @property draftMode reports missing keys and enables [StringCast.uploadLocalStrings].
@@ -25,7 +26,7 @@ public data class StringCastConfig @JvmOverloads constructor(
 ) {
     public companion object {
         /** Hosted API origin. Override [baseUrl] for self-hosted / local backends. */
-        public const val DEFAULT_BASE_URL: String = "https://api.stringcast.dev"
+        public const val DEFAULT_BASE_URL: String = "https://console.stringcast.app"
         public const val DEFAULT_REFRESH_INTERVAL_MS: Long = 15L * 60L * 1000L
     }
 }

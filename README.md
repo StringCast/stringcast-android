@@ -55,7 +55,7 @@ class App : Application() {
             StringCastConfig(
                 projectId = "p_8f3k2j",
                 sdkKey = "pk_…",                    // public SDK key, never the sk_ upload key
-                baseUrl = "https://api.example.com", // API origin, without /v1
+                // baseUrl = "http://10.0.2.2:8787",  // API origin without /v1; default https://console.stringcast.app
                 // languageOverride = "es",          // force a language
                 // draftMode = null,                 // null = on for debuggable builds only
                 // refreshIntervalMs = 15 * 60_000L,
@@ -168,6 +168,25 @@ First hit wins; otherwise the project's `baseLanguage`. Tags compare case-insens
 - Bundle URLs pointing at `localhost`/`127.0.0.1` are re-pointed at the configured `baseUrl`
   host so a device/emulator can reach a local backend.
 - All network, disk and parse errors are logged (tag `StringCast`) and swallowed.
+
+## What the SDK sends
+
+Manifest checks (`GET /v1/sdk/{projectId}/manifest`) and draft-mode reports
+(`POST /v1/sdk/{projectId}/missing`) go to `baseUrl` (default `https://console.stringcast.app`) with
+your public SDK key (`X-Api-Key`) and these check-in headers, so the portal can show which apps are
+connected (contract §4.2):
+
+| Header | Value |
+|---|---|
+| `X-StringCast-Platform` | `android` |
+| `X-StringCast-App-Id` | your package name (`context.packageName`) |
+| `X-StringCast-App-Version` | your `versionName` |
+| `X-StringCast-SDK-Version` | SDK version (`BuildConfig.SDK_VERSION`, e.g. `0.1.0`) |
+| `X-StringCast-Language` | the language the SDK resolved for this device, e.g. `es` |
+
+No device IDs, advertising IDs, user identifiers or other personal data are sent. Empty values are
+omitted and values are restricted to printable ASCII. Bundle downloads (CDN URLs from the manifest)
+carry no API key and no check-in headers, so they stay cacheable.
 
 ## Draft mode
 

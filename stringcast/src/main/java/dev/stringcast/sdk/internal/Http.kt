@@ -6,8 +6,17 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Minimal HttpURLConnection client. All methods throw IOException on transport failure. */
-internal class Http(private val apiKey: String, private val userAgent: String) {
+/**
+ * Minimal HttpURLConnection client. All methods throw IOException on transport failure.
+ *
+ * API requests (`sendKey = true`: manifest, missing) carry the SDK key and the check-in headers
+ * from [checkInHeaders]; public requests (`sendKey = false`: CDN bundle downloads) carry neither.
+ */
+internal class Http(
+    private val apiKey: String,
+    private val userAgent: String,
+    private val checkInHeaders: () -> Map<String, String> = { emptyMap() },
+) {
 
     class Response(val code: Int, val body: ByteArray?, val etag: String?) {
         val isSuccess get() = code in 200..299
@@ -38,7 +47,16 @@ internal class Http(private val apiKey: String, private val userAgent: String) {
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("User-Agent", userAgent)
-            if (sendKey) conn.setRequestProperty("X-Api-Key", apiKey)
+            if (sendKey) {
+                conn.setRequestProperty("X-Api-Key", apiKey)
+                val extra = try {
+                    checkInHeaders()
+                } catch (t: Throwable) {
+                    Logger.w("Building check-in headers failed", t)
+                    emptyMap()
+                }
+                for ((k, v) in extra) conn.setRequestProperty(k, v)
+            }
             if (ifNoneMatch != null) conn.setRequestProperty("If-None-Match", ifNoneMatch)
             if (body != null) {
                 conn.doOutput = true
