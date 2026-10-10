@@ -14,6 +14,17 @@ package app.stringcast.sdk
  * @property refreshIntervalMs minimum time between automatic manifest checks (default 15 min).
  *   [StringCast.refresh] with `force = true` ignores it.
  * @property logging verbose logcat output (tag `StringCast`). Failures are always logged as warnings.
+ * @property autoUploadLocalStrings draft mode only: once per app build (`versionName` +
+ *   `versionCode` + SDK version), upload every app-owned string, plural and string array in the
+ *   project's base language plus the app's existing compiled translations for the project's other
+ *   languages. The server creates missing keys and fills empty values; it never overwrites.
+ * @property rClasses the app's R classes to scan for its own strings, e.g.
+ *   `listOf(R::class.java, com.example.feature.R::class.java)`. Needed for multi-module apps (with
+ *   AGP 8's non-transitive R classes every module has its own `R`). Empty (default) = discover
+ *   `<applicationId>.R` (and its parent packages, so `.debug`/`.qa` suffixes work).
+ * @property excludedKeys resource names never uploaded or reported in draft mode (in addition to the
+ *   SDK's built-in list of library strings such as `abc_*`, `exo_*`, `mtrl_*`, `google_app_id`).
+ * @property excludedKeyPrefixes name prefixes never uploaded or reported in draft mode.
  */
 public data class StringCastConfig @JvmOverloads constructor(
     val projectId: String,
@@ -23,6 +34,10 @@ public data class StringCastConfig @JvmOverloads constructor(
     val draftMode: Boolean? = null,
     val refreshIntervalMs: Long = DEFAULT_REFRESH_INTERVAL_MS,
     val logging: Boolean = false,
+    val autoUploadLocalStrings: Boolean = true,
+    val rClasses: List<Class<*>> = emptyList(),
+    val excludedKeys: Set<String> = emptySet(),
+    val excludedKeyPrefixes: Set<String> = emptySet(),
 ) {
     public companion object {
         /** Hosted API origin. Override [baseUrl] for self-hosted / local backends. */
@@ -50,8 +65,10 @@ public data class UploadResult(
     val total: Int,
     /** Keys created on the server. */
     val created: Int,
-    /** Keys the server already had (never overwritten). */
+    /** Keys the server already had with a value (never overwritten). */
     val ignored: Int,
     /** Non-null if (part of) the upload failed. */
     val error: String? = null,
+    /** Existing keys whose empty translation was filled from the app's compiled resources. */
+    val filled: Int = 0,
 )

@@ -10,6 +10,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Draft-mode reporting of keys the app requests that the base bundle lacks (contract §6.6):
  * de-duplicated per process, debounced ~5 s, POSTed in background batches of at most 500.
  * Default values are computed lazily on the background thread.
+ *
+ * Only the app's own keys are reported: names on the library denylist / app exclusions
+ * ([KeyFilter]) are dropped immediately, and at flush time (background thread) keys that are not
+ * in the app's R classes ([Engine.ownedKeyNames]) are dropped too — so ExoPlayer/Material strings
+ * shown on screen never reach the project.
  */
 internal class MissingKeyReporter(private val engine: Engine) {
 
@@ -18,6 +23,7 @@ internal class MissingKeyReporter(private val engine: Engine) {
     private val scheduled = AtomicBoolean(false)
 
     fun report(key: String, defaultValue: () -> Value?) {
+        if (engine.keyFilter.isExcluded(key)) return
         if (!seen.add(key)) return
         pending[key] = defaultValue
         schedule()
@@ -35,10 +41,15 @@ internal class MissingKeyReporter(private val engine: Engine) {
 
     private fun flush() {
         if (engine.state.manifest == null) return // language unknown yet; re-scheduled after the next manifest
+        val owned = engine.ownedKeyNames()
         val batch = ArrayList<Pair<String, Value>>()
         for (key in pending.keys.toList()) {
             val provider = pending.remove(key) ?: continue
             if (!engine.isMissingFromBase(key)) continue
+            if (!isReportable(key, owned, engine.keyFilter)) {
+                Logger.d("Key '$key' is not one of the app's own strings; not reported")
+                continue
+            }
             val value = try {
                 provider()
             } catch (t: Throwable) {
@@ -70,6 +81,13 @@ internal class MissingKeyReporter(private val engine: Engine) {
 
     companion object {
         const val DEBOUNCE_MS = 5_000L
-        const val MAX_BATCH = 500
+        const val MAX_BATCH = LocalUploader.MAX_BATCH
+
+        /**
+         * True if [key] may be reported: not excluded by [filter] and, when the app's owned key set
+         * could be computed ([owned] non-null), part of it.
+         */
+        fun isReportable(key: String, owned: Set<String>?, filter: KeyFilter): Boolean =
+            !filter.isExcluded(key) && (owned == null || key in owned)
     }
 }

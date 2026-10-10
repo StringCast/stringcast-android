@@ -7,9 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import app.stringcast.sdk.internal.Engine
-import app.stringcast.sdk.internal.LocalStrings
 import app.stringcast.sdk.internal.Logger
-import app.stringcast.sdk.internal.MissingKeyReporter
 import app.stringcast.sdk.internal.PluralFallback
 import app.stringcast.sdk.internal.Plurals
 import app.stringcast.sdk.internal.StringCastContextWrapper
@@ -240,12 +238,18 @@ public object StringCast {
     }
 
     /**
-     * Draft mode only: uploads every `R.string`, `R.plurals` and `R.array` entry of the app (in
-     * the project's base language, i.e. normally `values/`) to `/missing`, in batches of ≤500.
-     * The server only creates keys that don't exist yet; it never overwrites.
+     * Draft mode only: uploads every app-owned `R.string`, `R.plurals` and `R.array` entry to
+     * `/missing` — the values in the project's base language (read for the base locale, normally
+     * `values/`) plus the app's compiled translations for the project's other languages (only
+     * values that differ from base). Batches of ≤500 keys, one language per request. The server
+     * creates missing keys and fills empty values; it never overwrites a non-empty value.
      *
-     * @param rClass the app's `R` class (e.g. `R::class.java`). Optional: by default it is looked
-     *   up from the package name (with `.debug`-style suffixes stripped).
+     * Draft mode already does this automatically once per app build
+     * (`StringCastConfig.autoUploadLocalStrings`); this call always uploads, regardless of that.
+     *
+     * @param rClass an extra R class to scan (e.g. `R::class.java`), in addition to
+     *   `StringCastConfig.rClasses`. Optional: with neither, `<applicationId>.R` is looked up from
+     *   the package name (with `.debug`-style suffixes stripped).
      * @param callback optional, invoked on the main thread with the outcome.
      */
     @JvmStatic
@@ -265,31 +269,8 @@ public object StringCast {
                     done(UploadResult(0, 0, 0, "Could not reach the StringCast API"))
                     return@launch
                 }
-                val entries = ArrayList<Pair<String, Value>>()
-                for (type in listOf("string", "plurals", "array")) {
-                    for ((name, id) in LocalStrings.entries(e.app, type, rClass)) {
-                        e.resources.valueForResource(id, type)?.let { entries += name to it }
-                    }
-                }
-                if (entries.isEmpty()) {
-                    done(UploadResult(0, 0, 0, "No R\$string entries found; pass your R class explicitly"))
-                    return@launch
-                }
-                var created = 0
-                var ignored = 0
-                var error: String? = null
-                val language = e.resources.baseLanguage()
-                for (chunk in entries.chunked(MissingKeyReporter.MAX_BATCH)) {
-                    val resp = e.postMissing(language, chunk)
-                    if (resp.isSuccess) {
-                        val o = runCatching { org.json.JSONObject(resp.text()) }.getOrNull()
-                        created += o?.optInt("created") ?: 0
-                        ignored += o?.optInt("ignored") ?: 0
-                    } else {
-                        error = "HTTP ${resp.code}: ${resp.text().take(300)}"
-                    }
-                }
-                done(UploadResult(entries.size, created, ignored, error))
+                val o = e.uploadLocalStrings(rClass)
+                done(UploadResult(o.total, o.created, o.ignored, o.error, o.filled))
             } catch (t: Throwable) {
                 done(UploadResult(0, 0, 0, t.toString()))
             }

@@ -36,9 +36,20 @@ The SDK is published to Maven Central as `app.stringcast:stringcast-android`
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("app.stringcast:stringcast-android:0.1.0")
+    implementation("app.stringcast:stringcast-android:0.1.1")
 }
 ```
+
+Or from JitPack (tags of this repository):
+
+```kotlin
+// settings.gradle.kts → dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
+dependencies {
+    implementation("com.github.StringCast:stringcast-android:v0.1.1")
+}
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed between versions.
 
 The Kotlin package is `app.stringcast.sdk` (`import app.stringcast.sdk.StringCast`,
 `import app.stringcast.sdk.StringCastConfig`).
@@ -70,6 +81,7 @@ class App : Application() {
                 // baseUrl = "http://10.0.2.2:8787",  // API origin without /v1; default https://console.stringcast.app
                 // languageOverride = "es",          // force a language
                 // draftMode = null,                 // null = on for debuggable builds only
+                // rClasses = listOf(R::class.java),  // multi-module: every module's R (see Draft mode)
                 // refreshIntervalMs = 15 * 60_000L,
                 // logging = BuildConfig.DEBUG,
             ),
@@ -193,7 +205,7 @@ connected (contract §4.2):
 | `X-StringCast-Platform` | `android` |
 | `X-StringCast-App-Id` | your package name (`context.packageName`) |
 | `X-StringCast-App-Version` | your `versionName` |
-| `X-StringCast-SDK-Version` | SDK version (`BuildConfig.SDK_VERSION`, e.g. `0.1.0`) |
+| `X-StringCast-SDK-Version` | SDK version (`BuildConfig.SDK_VERSION`, e.g. `0.1.1`) |
 | `X-StringCast-Language` | the language the SDK resolved for this device, e.g. `es` |
 
 No device IDs, advertising IDs, user identifiers or other personal data are sent. Empty values are
@@ -202,26 +214,83 @@ carry no API key and no check-in headers, so they stay cacheable.
 
 ## Draft mode
 
-`draftMode` defaults to `true` for debuggable builds and `false` for release builds.
+`draftMode` defaults to `true` for debuggable builds and `false` for release builds. Draft mode
+is how a debug/QA build fills the project: run it once and the app's strings appear in the portal.
 
-- **Missing keys**: strings the app requests that are not in the base bundle are collected,
-  debounced (~5 s) and POSTed to `/v1/sdk/{projectId}/missing` in batches of ≤ 500, with the value
-  from the app's base-language (`values/`) resources. Only the app's own resources are reported
-  (framework and library strings such as `abc_*` are filtered out); keys without a local value
-  are not reported. The server never overwrites existing keys.
-- **`StringCast.uploadLocalStrings()`** uploads every entry of the app's `R.string`, `R.plurals`
-  and `R.array` (base-language values) in batches of ≤ 500:
+### Automatic full upload (once per build)
+
+Shortly after `init`, on a background thread, the SDK uploads **every string, plural and string
+array the app owns** to `POST /v1/sdk/{projectId}/missing`:
+
+1. **Base values** — each key's value in the project's **base language**, read from the compiled
+   resources resolved for the base locale (so a device set to Spanish still uploads `values/`, not
+   `values-es/`).
+2. **Existing translations** — for every other project language, the compiled value for that
+   locale (`values-es/`, `values-pt-rBR/`, …), but only when it differs from the base value:
+   Android falls back to `values/` when a translation is missing, so "same as base" means "not
+   translated". Plurals and arrays are compared as a whole.
+
+Requests carry one language each and at most 500 keys. The server creates keys that don't exist
+and fills values that are empty in that language; it **never overwrites** a non-empty value, so
+edits made in the portal are safe.
+
+It runs **once per app build**: the marker `versionName|versionCode|sdkVersion` is stored in
+SharedPreferences only after every batch succeeded. It waits until the project manifest is known
+(cached or fetched) so the base language and project languages are known; if the API can't be
+reached, or a batch fails, it tries again on the next launch. Turn it off with
+`autoUploadLocalStrings = false` (it is never active outside draft mode).
+
+To force a re-upload of the same build (e.g. you added strings without bumping `versionCode`),
+clear the app's data, or call `StringCast.uploadLocalStrings()` — it runs the same upload (base +
+translations) and ignores the marker:
+
+```kotlin
+StringCast.uploadLocalStrings { result ->
+    Log.i("App", "uploaded ${result.total}: ${result.created} new, ${result.ignored} existing, error=${result.error}")
+}
+```
+
+`uploadLocalStrings(rClass)` also accepts an extra R class to scan in addition to `rClasses`.
+
+### Which keys are "the app's own"
+
+Keys are enumerated by reflection over the app's `R.string`, `R.plurals` and `R.array`:
+
+- **Single-module apps**: nothing to configure — the SDK finds `<applicationId>.R` (and its parent
+  packages, so `com.acme.app.qa` → `com.acme.app.R`).
+- **Multi-module apps**: with AGP 8's default non-transitive R classes every module has its own
+  `R`, so list the modules that contain strings:
 
   ```kotlin
-  StringCast.uploadLocalStrings(R::class.java) { result ->
-      Log.i("App", "uploaded ${result.total}: ${result.created} new, ${result.ignored} existing, error=${result.error}")
-  }
+  StringCastConfig(
+      projectId = "p_…", sdkKey = "pk_…",
+      rClasses = listOf(R::class.java, com.acme.feature.checkout.R::class.java, com.acme.core.ui.R::class.java),
+  )
   ```
 
-  `R::class.java` is optional — without it the SDK looks for `<applicationId>.R` and its parent
-  packages (so `.debug` suffixes work). With AGP 8's default non-transitive R classes this is
-  exactly the app module's own strings. Plural forms are read back using sample quantities for
-  each CLDR category of the base language.
+- **Library strings are dropped.** With legacy transitive R classes
+  (`android.nonTransitiveRClass=false`) the app's `R` also contains every library's strings. The
+  SDK always skips a built-in list of library and generated names — AppCompat `abc_*`, Media3 /
+  ExoPlayer `exo_*`, Material `mtrl_*` / `material_*` / `m3_*` / `m3c_*`, Play services
+  `common_google_play_services_*`, `fcm_*`, `androidx_*`, Compose accessibility strings such as
+  `tab`, `selected`, `expanded`, `in_progress` (and `<name>_*`), and the values generated by the
+  google-services / Crashlytics / Facebook plugins (`google_app_id`, `gcm_defaultSenderId`,
+  `default_web_client_id`, `google_api_key`, `project_id`, `facebook_app_id`, …). The full list
+  is in `internal/KeyFilter.kt`.
+- **App-specific exclusions**: `excludedKeys = setOf("debug_menu_title")`,
+  `excludedKeyPrefixes = setOf("internal_", "qa_")`.
+
+Plural forms are read back using sample quantities for each CLDR category of the language.
+Strings marked `translatable="false"` are uploaded as base values (the SDK can't see that flag at
+runtime); their "translations" equal base and are skipped.
+
+### Missing keys at runtime
+
+Strings the app requests that are not in the base bundle are collected, debounced (~5 s) and
+POSTed to `/missing` in batches of ≤ 500, with the value from the app's base-language resources.
+The same ownership rules apply: only keys in the app's R classes (above) that are not excluded
+are reported, so ExoPlayer/Material strings shown on screen never reach the project. Keys without
+a local value are not reported.
 
 ## Uploading strings at build time (CLI)
 
@@ -265,7 +334,8 @@ for keys missing from the bundle comes from the base language.
 `sample/` targets the local backend (`cd backend && npm run seed && npm run dev`):
 `http://10.0.2.2:8787`, project `p_demo`, key `pk_demo_local` (cleartext allowed for `10.0.2.2`
 only). It shows layout strings, a plural driven by a slider, a language picker (System/EN/ES/FR)
-and a Refresh button; long-press Refresh to run `uploadLocalStrings()`.
+and a Refresh button. As a debuggable build it uploads its strings automatically on first launch;
+long-press Refresh to run `uploadLocalStrings()` again.
 
 ```bash
 ./gradlew :sample:installDebug

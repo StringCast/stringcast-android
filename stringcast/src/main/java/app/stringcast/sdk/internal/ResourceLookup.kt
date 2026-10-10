@@ -25,8 +25,8 @@ internal class ResourceLookup(private val engine: Engine) {
 
     private val appPackage: String = engine.app.packageName
 
-    @Volatile
-    private var baseResCache: Pair<String, Resources>? = null
+    /** Language tag → compiled resources for that locale (draft-mode reads only). */
+    private val localeResCache = ConcurrentHashMap<String, Resources>()
 
     // ---------------------------------------------------------------------------------------
     // id <-> name
@@ -136,31 +136,28 @@ internal class ResourceLookup(private val engine: Engine) {
     private fun maybeReport(res: Resources, id: Int, name: String, type: String) {
         val reporter = engine.missing ?: return
         if (!engine.isMissingFromBase(name)) return
-        if (!isAppOwned(res, id, name, type)) return
+        if (isFrameworkResource(res, id)) return
+        // Ownership (app R classes) and the library denylist are checked by the reporter.
         reporter.report(name) { valueForResource(id, type) }
     }
 
-    /** Excludes framework and (as far as we can tell) library resources from missing reports. */
-    private fun isAppOwned(res: Resources, id: Int, name: String, type: String): Boolean {
-        val pkg = try {
-            res.getResourcePackageName(id)
-        } catch (t: Throwable) {
-            return false
-        }
-        if (pkg == "android") return false
-        val own = LocalStrings.appResourceNames(engine.app, type)
-        if (own != null) return name in own
-        return LIBRARY_PREFIXES.none { name.startsWith(it) }
+    private fun isFrameworkResource(res: Resources, id: Int): Boolean = try {
+        res.getResourcePackageName(id) == "android"
+    } catch (t: Throwable) {
+        true
     }
 
     /** Reads a compiled value in the project's base language (used for `/missing` payloads). */
-    fun valueForResource(id: Int, type: String): Value? = try {
-        val res = baseResources()
+    fun valueForResource(id: Int, type: String): Value? = valueForResource(id, type, baseLanguage())
+
+    /** Reads a compiled value with the app's resources resolved for [language]. */
+    fun valueForResource(id: Int, type: String, language: String): Value? = try {
+        val res = resourcesFor(language)
         when (type) {
             "string" -> Value.Text(res.getText(id).toString())
             "plurals" -> {
                 val forms = LinkedHashMap<String, String>()
-                for ((category, n) in Plurals.samples(baseLanguage())) {
+                for ((category, n) in Plurals.samples(language)) {
                     forms[category] = res.getQuantityText(id, n).toString()
                 }
                 if ("other" !in forms) forms["other"] = res.getQuantityText(id, 100).toString()
@@ -179,27 +176,25 @@ internal class ResourceLookup(private val engine: Engine) {
     fun baseLanguage(): String = engine.state.manifest?.baseLanguage?.ifEmpty { null } ?: "en"
 
     /** App resources configured for the project's base language (i.e. normally `values/`). */
-    @SuppressLint("AppBundleLocaleChanges") // only reads the default `values/` strings
-    fun baseResources(): Resources {
-        val lang = baseLanguage()
-        baseResCache?.let { if (it.first == lang) return it.second }
+    fun baseResources(): Resources = resourcesFor(baseLanguage())
+
+    /**
+     * The app's compiled (un-wrapped) resources resolved for [language] via
+     * `createConfigurationContext`, independent of the device language.
+     */
+    @SuppressLint("AppBundleLocaleChanges") // only reads compiled values for upload
+    fun resourcesFor(language: String): Resources {
+        localeResCache[language]?.let { return it }
         val app: Context = engine.app
         val cfg = Configuration(app.resources.configuration)
-        val locale = Locale.forLanguageTag(lang)
+        val locale = Locale.forLanguageTag(language)
         if (Build.VERSION.SDK_INT >= 24) cfg.setLocales(LocaleList(locale)) else @Suppress("DEPRECATION") cfg.setLocale(locale)
         val res = app.createConfigurationContext(cfg).resources.let { (it as? StringCastResources)?.original ?: it }
-        baseResCache = lang to res
-        return res
+        return localeResCache.putIfAbsent(language, res) ?: res
     }
 
     companion object {
         private const val NONE = "\u0000"
         private val TAG = Regex("<\\s*/?\\s*(b|i|u|em|strong|small|big|sup|sub|strike|s|tt|font|a|br|span)\\b", RegexOption.IGNORE_CASE)
-        private val LIBRARY_PREFIXES = listOf(
-            "abc_", "mtrl_", "material_", "m3_", "androidx_", "fab_", "bottomsheet_", "appbar_", "character_counter_",
-            "clear_text_", "error_icon_", "exposed_dropdown_", "hide_bottom_view_", "icon_content_description",
-            "item_view_role_", "password_toggle_", "path_password_", "search_menu_title", "status_bar_notification_",
-            "call_notification_", "side_sheet_", "searchbar_", "searchview_", "common_google_", "fcm_",
-        )
     }
 }

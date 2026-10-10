@@ -100,7 +100,7 @@ class CheckInHeadersTest {
             assertEquals("android", h["x-stringcast-platform"])
             assertEquals("com.example.app", h["x-stringcast-app-id"])
             assertEquals("2.3.1", h["x-stringcast-app-version"])
-            assertEquals("0.1.0", h["x-stringcast-sdk-version"])
+            assertEquals("0.1.1", h["x-stringcast-sdk-version"])
             assertEquals("es", h["x-stringcast-language"])
         }
     }

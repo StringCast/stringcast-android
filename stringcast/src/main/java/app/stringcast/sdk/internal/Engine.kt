@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.LocaleList
 import android.os.SystemClock
+import androidx.core.content.pm.PackageInfoCompat
 import app.stringcast.sdk.BuildConfig
 import app.stringcast.sdk.StringCastConfig
 import app.stringcast.sdk.StringCastUpdate
@@ -25,6 +26,7 @@ import kotlinx.coroutines.sync.withLock
 import java.net.URL
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The SDK runtime (contract §6). One instance per process, created by `StringCast.init`.
@@ -86,7 +88,27 @@ internal class Engine(
     private var lastCheck = 0L
 
     val resources = ResourceLookup(this)
+    val keyFilter = KeyFilter(config.excludedKeys, config.excludedKeyPrefixes)
     val missing: MissingKeyReporter? = if (draftMode) MissingKeyReporter(this) else null
+
+    private val uploader = LocalUploader(
+        readValue = { entry, language -> resources.valueForResource(entry.id, entry.type, language) },
+        post = ::postMissing,
+    )
+    private val uploadLock = Any()
+    private val autoUploadAttempted = AtomicBoolean(false)
+
+    /** Owned entries from `config.rClasses` (or discovery); null when no R class could be found. */
+    private val defaultOwned: List<LocalStrings.Entry>? by lazy {
+        val classes = rClassesFor(null)
+        if (classes.isEmpty()) {
+            Logger.w("No R class found for ${app.packageName}; set StringCastConfig.rClasses (draft mode)")
+            null
+        } else {
+            LocalStrings.owned(classes, { emptyList() }, keyFilter, LocalStrings.resourceNameResolver(app))
+        }
+    }
+    private val defaultOwnedNames: Set<String>? by lazy { defaultOwned?.mapTo(HashSet()) { it.name } }
 
     // ---------------------------------------------------------------------------------------
     // Startup
@@ -140,7 +162,10 @@ internal class Engine(
     // ---------------------------------------------------------------------------------------
 
     fun refresh(force: Boolean) {
-        scope.launch { refreshNow(force) }
+        scope.launch {
+            refreshNow(force)
+            maybeAutoUpload()
+        }
     }
 
     fun setLanguage(code: String?) {
@@ -160,6 +185,91 @@ internal class Engine(
 
     fun postMissing(language: String, keys: List<Pair<String, Value>>): Http.Response =
         http.postJson("$sdkBase/missing", Json.missingPayload("android", language, keys))
+
+    // ---------------------------------------------------------------------------------------
+    // Draft mode: owned keys and local-strings upload
+    // ---------------------------------------------------------------------------------------
+
+    /** R classes to scan: config `rClasses` + [extra]; discovery from the package name if none. */
+    private fun rClassesFor(extra: Class<*>?): List<Class<*>> {
+        val explicit = (config.rClasses + listOfNotNull(extra)).distinct()
+        if (explicit.isNotEmpty()) return explicit
+        return LocalStrings.discoverRClasses(LocalStrings.candidatePackages(app), app.classLoader)
+    }
+
+    /** The app's own string/plurals/array entries (library and excluded names removed). */
+    fun ownedEntries(extra: Class<*>? = null): List<LocalStrings.Entry> =
+        if (extra == null || extra in config.rClasses) {
+            defaultOwned.orEmpty()
+        } else {
+            LocalStrings.owned(rClassesFor(extra), { emptyList() }, keyFilter, LocalStrings.resourceNameResolver(app))
+        }
+
+    /** Names of the app's own keys, or null if no R class could be found. Call off the main thread. */
+    fun ownedKeyNames(): Set<String>? = try {
+        defaultOwnedNames
+    } catch (t: Throwable) {
+        Logger.w("Scanning R classes failed", t)
+        null
+    }
+
+    /**
+     * Uploads every owned key in the base language plus existing compiled translations
+     * ([LocalUploader]). Blocking; call on a background thread with a known manifest.
+     */
+    fun uploadLocalStrings(extraR: Class<*>?): LocalUploader.Outcome = synchronized(uploadLock) {
+        val manifest = state.manifest
+            ?: return LocalUploader.Outcome(0, 0, 0, 0, 0, "Could not reach the StringCast API")
+        val base = manifest.baseLanguage.ifEmpty { resources.baseLanguage() }
+        val entries = ownedEntries(extraR)
+        Logger.d("Uploading ${entries.size} local key(s): base=$base languages=${manifest.languageCodes}")
+        val outcome = uploader.upload(entries, base, manifest.languageCodes)
+        Logger.i(
+            "Local strings upload: ${outcome.total} base value(s) + ${outcome.translations} translation(s); " +
+                "created=${outcome.created} filled=${outcome.filled} ignored=${outcome.ignored}" +
+                (outcome.error?.let { " error=$it" } ?: ""),
+        )
+        outcome
+    }
+
+    /**
+     * Automatic full upload, once per app build (draft mode + `autoUploadLocalStrings`). Runs after
+     * a refresh once a manifest (cached or fetched) is known; at most one attempt per process.
+     * The marker is stored only after every batch succeeded, so a failure retries next launch.
+     */
+    private fun maybeAutoUpload() {
+        if (!draftMode || !config.autoUploadLocalStrings) return
+        if (state.manifest == null) return // retried after the next refresh / next launch
+        if (!autoUploadAttempted.compareAndSet(false, true)) return
+        try {
+            val marker = AutoUploadGate.marker(appVersion, appVersionCode(), BuildConfig.SDK_VERSION)
+            val gate = AutoUploadGate(object : AutoUploadGate.MarkerStore {
+                override fun get(): String? = prefs.getString(autoUploadMarkerKey, null)
+                override fun put(value: String) {
+                    prefs.edit().putString(autoUploadMarkerKey, value).apply()
+                }
+            })
+            if (gate.isDone(marker)) {
+                Logger.d("Local strings already uploaded for build $marker")
+                return
+            }
+            if (gate.run(marker) { uploadLocalStrings(null) } == AutoUploadGate.Result.UPLOADED) {
+                Logger.i("Automatic upload complete for build $marker")
+            }
+        } catch (t: Throwable) {
+            Logger.w("Automatic upload failed", t)
+        }
+    }
+
+    private val autoUploadMarkerKey: String get() = "$KEY_AUTO_UPLOAD_PREFIX${config.projectId}"
+
+    private fun appVersionCode(): Long = try {
+        @Suppress("DEPRECATION")
+        val info = app.packageManager.getPackageInfo(app.packageName, 0)
+        PackageInfoCompat.getLongVersionCode(info)
+    } catch (t: Throwable) {
+        0L
+    }
 
     /** Makes sure a manifest is known (fetching it if needed). Returns it, or null when offline. */
     suspend fun awaitManifest(): Manifest? {
@@ -418,6 +528,7 @@ internal class Engine(
         private const val PREFS = "app.stringcast.sdk"
         private const val KEY_ETAG = "manifest_etag"
         private const val KEY_OVERRIDE = "language_override"
+        private const val KEY_AUTO_UPLOAD_PREFIX = "local_upload_marker:"
 
         fun normalizeBaseUrl(url: String): String {
             var u = url.trim().trimEnd('/')

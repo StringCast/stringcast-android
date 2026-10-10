@@ -67,7 +67,7 @@ Signing is turned on only when `signingInMemoryKey` (or `signing.keyId`) is set,
 
 ## Cutting a release
 
-1. Set `VERSION_NAME` in `gradle.properties` (e.g. `0.1.0`), update README install snippet.
+1. Set `VERSION_NAME` in `gradle.properties` (e.g. `0.1.0`), update README install snippets and add a `CHANGELOG.md` entry.
 2. Sanity check locally:
    ```bash
    ./gradlew :stringcast:testDebugUnitTest :stringcast:assembleRelease :sample:assembleDebug

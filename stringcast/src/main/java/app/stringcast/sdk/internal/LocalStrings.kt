@@ -2,72 +2,121 @@ package app.stringcast.sdk.internal
 
 import android.content.Context
 import java.lang.reflect.Modifier
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Reflection over the app's generated `R$string`, `R$plurals` and `R$array` classes.
+ * Reflection over the app's generated `R$string`, `R$plurals` and `R$array` classes: the set of
+ * keys the app *owns* (draft-mode upload and missing-key reports).
  *
- * With AGP 8's default non-transitive R classes, `<namespace>.R` only contains the app module's
- * own resources, which is exactly the set we want to upload / report (not AndroidX's).
+ * The R classes come from `StringCastConfig.rClasses` (one per module that has strings — with
+ * AGP 8's non-transitive R classes each module has its own `R`), or, when none are configured,
+ * from discovery: `<applicationId>.R` and its parent packages (so `com.acme.app.qa` finds
+ * `com.acme.app.R`). The result is then passed through [KeyFilter] so library strings merged into
+ * a transitive `R` are dropped.
  */
 internal object LocalStrings {
 
-    private val namesCache = ConcurrentHashMap<String, Set<String>>()
-    private val NOT_FOUND = emptySet<String>()
+    val TYPES: List<String> = listOf("string", "plurals", "array")
+
+    /** One owned resource: `R.<type>.<name>` with its resource [id]. */
+    data class Entry(val type: String, val name: String, val id: Int)
 
     /** Candidate packages for the app's R class: applicationId and its parents (strips `.debug` etc.). */
-    fun candidatePackages(context: Context): List<String> {
+    fun candidatePackages(packageName: String?, applicationClassName: String?): List<String> {
         val out = LinkedHashSet<String>()
-        var pkg = context.packageName
+        var pkg = packageName.orEmpty()
         while (pkg.count { it == '.' } >= 1) {
             out += pkg
             pkg = pkg.substringBeforeLast('.')
         }
-        context.applicationInfo?.className?.substringBeforeLast('.', "")?.takeIf { it.isNotEmpty() }?.let { out += it }
+        applicationClassName?.substringBeforeLast('.', "")?.takeIf { it.isNotEmpty() }?.let { out += it }
         return out.toList()
     }
 
-    /** Finds `<pkg>.R$<type>` for the first candidate package that has it. */
-    fun rClass(context: Context, type: String, explicitR: Class<*>? = null): Class<*>? {
-        if (explicitR != null) {
-            explicitR.declaredClasses.firstOrNull { it.simpleName == type }?.let { return it }
-            return runCatching { Class.forName("${explicitR.name}\$$type", false, explicitR.classLoader) }.getOrNull()
+    fun candidatePackages(context: Context): List<String> =
+        candidatePackages(context.packageName, context.applicationInfo?.className)
+
+    /** The first `<pkg>.R` among [packages] that exists, as a single-element list (or empty). */
+    fun discoverRClasses(packages: List<String>, loader: ClassLoader?): List<Class<*>> {
+        for (pkg in packages) {
+            val r = loadClass("$pkg.R", loader)
+            // Accept the R class only if it actually has string-ish resources.
+            if (r != null && TYPES.any { nested(r, it) != null }) return listOf(r)
         }
-        val loader = context.classLoader
-        for (pkg in candidatePackages(context)) {
-            try {
-                return Class.forName("$pkg.R\$$type", false, loader)
-            } catch (_: ClassNotFoundException) {
-            } catch (_: LinkageError) {
-            }
-        }
-        return null
+        return emptyList()
     }
 
-    /** `name → id` of every static int field of the R class for [type]. */
-    fun entries(context: Context, type: String, explicitR: Class<*>? = null): Map<String, Int> {
-        val cls = rClass(context, type, explicitR) ?: return emptyMap()
-        val out = LinkedHashMap<String, Int>()
-        for (f in cls.declaredFields) {
-            if (!Modifier.isStatic(f.modifiers) || f.type != Int::class.javaPrimitiveType) continue
-            try {
-                f.isAccessible = true
-                val id = f.getInt(null)
-                // Field names have '.' replaced by '_'; resolve the real resource name.
-                val name = context.resources.getResourceEntryName(id)
-                out[name] = id
-            } catch (_: Throwable) {
+    /** `R$<type>` nested in [rClass], or null. */
+    fun nested(rClass: Class<*>, type: String): Class<*>? {
+        try {
+            rClass.declaredClasses.firstOrNull { it.simpleName == type }?.let { return it }
+        } catch (_: Throwable) {
+        }
+        return loadClass("${rClass.name}\$$type", rClass.classLoader)
+    }
+
+    /**
+     * Every static int field of `R$string`, `R$plurals` and `R$array` of each class in [rClasses],
+     * de-duplicated by key name (the StringCast key namespace is flat; first occurrence wins).
+     * [nameOf] maps (resource id, field name) to the real resource name — fields have `.` replaced
+     * by `_`, so on a device this is `Resources.getResourceEntryName(id)`; null skips the field.
+     */
+    fun scan(rClasses: List<Class<*>>, nameOf: (id: Int, fieldName: String) -> String?): List<Entry> {
+        val seen = HashSet<String>()
+        val out = ArrayList<Entry>()
+        for (r in rClasses.distinct()) {
+            for (type in TYPES) {
+                val cls = nested(r, type) ?: continue
+                val fields = try {
+                    cls.declaredFields
+                } catch (_: Throwable) {
+                    continue
+                }
+                for (f in fields) {
+                    if (!Modifier.isStatic(f.modifiers) || f.type != Int::class.javaPrimitiveType) continue
+                    try {
+                        f.isAccessible = true
+                        val id = f.getInt(null)
+                        val name = nameOf(id, f.name) ?: continue
+                        if (seen.add(name)) out += Entry(type, name, id)
+                    } catch (_: Throwable) {
+                    }
+                }
             }
         }
         return out
     }
 
-    /** Names of the app's own resources of [type], or null if the R class can't be found. */
-    fun appResourceNames(context: Context, type: String): Set<String>? {
-        val cached = namesCache.getOrPut(type) {
-            val e = entries(context, type)
-            if (e.isEmpty()) NOT_FOUND else e.keys
+    /**
+     * The owned entries: [explicit] R classes (config `rClasses` + an optional extra one), or the
+     * [discover]ed app R class when none are given; minus everything [filter] excludes.
+     */
+    fun owned(
+        explicit: List<Class<*>>,
+        discover: () -> List<Class<*>>,
+        filter: KeyFilter,
+        nameOf: (id: Int, fieldName: String) -> String?,
+    ): List<Entry> {
+        val classes = explicit.ifEmpty { discover() }
+        return scan(classes, nameOf).filterNot { filter.isExcluded(it.name) }
+    }
+
+    /** Resource-name resolver backed by the app's resources (null for ids it doesn't know). */
+    fun resourceNameResolver(context: Context): (Int, String) -> String? {
+        val res = context.resources
+        return { id, _ ->
+            try {
+                res.getResourceEntryName(id)
+            } catch (_: Throwable) {
+                null
+            }
         }
-        return if (cached === NOT_FOUND) null else cached
+    }
+
+    private fun loadClass(name: String, loader: ClassLoader?): Class<*>? = try {
+        Class.forName(name, false, loader ?: LocalStrings::class.java.classLoader)
+    } catch (_: ClassNotFoundException) {
+        null
+    } catch (_: LinkageError) {
+        null
     }
 }

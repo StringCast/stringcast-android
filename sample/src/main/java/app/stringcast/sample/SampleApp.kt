@@ -16,7 +16,9 @@ class SampleApp : Application() {
                 baseUrl = "http://10.0.2.2:8787",
                 // baseUrl = "https://console.stringcast.app", // production (also the default if baseUrl is omitted)
                 logging = true,
-                // draftMode defaults to true for debuggable builds.
+                // draftMode defaults to true for debuggable builds: the first run uploads every
+                // string of the R classes below (base language + existing translations).
+                rClasses = listOf(R::class.java),
             ),
         )
     }
