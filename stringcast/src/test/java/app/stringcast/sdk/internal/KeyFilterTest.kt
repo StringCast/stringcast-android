@@ -65,15 +65,13 @@ class KeyFilterTest {
         assertFalse(f.isExcluded("welcome_title")) // blank entries are ignored, not "match everything"
     }
 
-    @Test fun reporterOnlyReportsOwnedNonExcludedKeys() {
-        val owned = setOf("welcome_title", "promo_banner")
+    @Test fun reporterDropsOnlyLibraryAndExcludedKeys() {
         val f = KeyFilter(excludedKeyPrefixes = setOf("promo_"))
-        assertTrue(MissingKeyReporter.isReportable("welcome_title", owned, f))
-        assertFalse(MissingKeyReporter.isReportable("promo_banner", owned, f)) // owned but excluded
-        assertFalse(MissingKeyReporter.isReportable("exo_controls_playback_speeds", owned, f))
-        assertFalse(MissingKeyReporter.isReportable("some_library_string", owned, f)) // not owned
-        // No owned set computable: fall back to the denylist only.
-        assertTrue(MissingKeyReporter.isReportable("some_library_string", null, f))
-        assertFalse(MissingKeyReporter.isReportable("exo_controls_playback_speeds", null, f))
+        assertTrue(MissingKeyReporter.isReportable("welcome_title", f))
+        // A key from a module that isn't in rClasses is still one of the app's keys: reported.
+        assertTrue(MissingKeyReporter.isReportable("auth_sign_in_title", f))
+        assertFalse(MissingKeyReporter.isReportable("promo_banner", f)) // excluded by the app
+        assertFalse(MissingKeyReporter.isReportable("exo_controls_playback_speeds", f)) // library
+        assertFalse(MissingKeyReporter.isReportable("abc_action_bar_home_description", f))
     }
 }

@@ -68,4 +68,29 @@ class LocalStringsTest {
     @Test fun discoveryReturnsNothingWhenNoRClassExists() {
         assertEquals(emptyList<Class<*>>(), LocalStrings.discoverRClasses(listOf("does.not.exist"), javaClass.classLoader))
     }
+
+    @Test fun packageRootIsTheFirstTwoSegments() {
+        assertEquals("com.virginvoyages", LocalStrings.packageRoot("com.virginvoyages.sailor.qa"))
+        assertEquals("com.acme", LocalStrings.packageRoot("com.acme"))
+        assertEquals(null, LocalStrings.packageRoot("acme"))
+        assertEquals(null, LocalStrings.packageRoot(null))
+    }
+
+    @Test fun moduleRClassesAreFoundUnderTheAppRootOnly() {
+        val dex = sequenceOf(
+            "com.virginvoyages.sailor.R",
+            "com.virginvoyages.sailor.R\$string",
+            "com.virginvoyages.feature.auth.R\$string",
+            "com.virginvoyages.feature.auth.R\$plurals",
+            "com.virginvoyages.core.ui.R\$array",          // a module with arrays only
+            "com.virginvoyages.core.network.R\$id",        // no string-ish resources
+            "androidx.appcompat.R\$string",                // library
+            "com.google.android.material.R\$string",       // library
+            "com.virginvoyages.feature.auth.LoginActivity",
+        )
+        assertEquals(
+            listOf("com.virginvoyages.core.ui.R", "com.virginvoyages.feature.auth.R", "com.virginvoyages.sailor.R"),
+            LocalStrings.moduleRClassNames(dex, "com.virginvoyages"),
+        )
+    }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- Multi-module apps work without configuration: when `rClasses` is not set, draft builds discover every
+  module `R` class in the app's own package (e.g. `com.acme.feature.auth.R`) and upload all of their strings.
+- Runtime missing-key reports no longer drop keys that aren't in the scanned R classes; only library
+  strings (denylist) and `excludedKeys` / `excludedKeyPrefixes` are filtered. Keys from a module missing
+  from `rClasses` are reported again.
+
 All notable changes to the StringCast Android SDK (`app.stringcast:stringcast-android`).
 
 ## 0.1.1 — 2026-10-10

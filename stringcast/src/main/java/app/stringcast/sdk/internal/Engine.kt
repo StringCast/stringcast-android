@@ -108,7 +108,6 @@ internal class Engine(
             LocalStrings.owned(classes, { emptyList() }, keyFilter, LocalStrings.resourceNameResolver(app))
         }
     }
-    private val defaultOwnedNames: Set<String>? by lazy { defaultOwned?.mapTo(HashSet()) { it.name } }
 
     // ---------------------------------------------------------------------------------------
     // Startup
@@ -194,7 +193,10 @@ internal class Engine(
     private fun rClassesFor(extra: Class<*>?): List<Class<*>> {
         val explicit = (config.rClasses + listOfNotNull(extra)).distinct()
         if (explicit.isNotEmpty()) return explicit
-        return LocalStrings.discoverRClasses(LocalStrings.candidatePackages(app), app.classLoader)
+        val discovered = LocalStrings.discoverRClasses(LocalStrings.candidatePackages(app), app.classLoader) +
+            LocalStrings.discoverModuleRClasses(app)
+        Logger.d("Discovered R classes: ${discovered.distinct().joinToString { it.name }}")
+        return discovered.distinct()
     }
 
     /** The app's own string/plurals/array entries (library and excluded names removed). */
@@ -204,14 +206,6 @@ internal class Engine(
         } else {
             LocalStrings.owned(rClassesFor(extra), { emptyList() }, keyFilter, LocalStrings.resourceNameResolver(app))
         }
-
-    /** Names of the app's own keys, or null if no R class could be found. Call off the main thread. */
-    fun ownedKeyNames(): Set<String>? = try {
-        defaultOwnedNames
-    } catch (t: Throwable) {
-        Logger.w("Scanning R classes failed", t)
-        null
-    }
 
     /**
      * Uploads every owned key in the base language plus existing compiled translations

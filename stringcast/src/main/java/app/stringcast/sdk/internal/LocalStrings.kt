@@ -10,7 +10,8 @@ import java.lang.reflect.Modifier
  * The R classes come from `StringCastConfig.rClasses` (one per module that has strings — with
  * AGP 8's non-transitive R classes each module has its own `R`), or, when none are configured,
  * from discovery: `<applicationId>.R` and its parent packages (so `com.acme.app.qa` finds
- * `com.acme.app.R`). The result is then passed through [KeyFilter] so library strings merged into
+ * `com.acme.app.R`) plus every module `R` found in the app's dex files under the app's package
+ * root (`com.acme.feature.auth.R`, …; library R classes such as `androidx.*` are outside it). The result is then passed through [KeyFilter] so library strings merged into
  * a transitive `R` are dropped.
  */
 internal object LocalStrings {
@@ -43,6 +44,46 @@ internal object LocalStrings {
             if (r != null && TYPES.any { nested(r, it) != null }) return listOf(r)
         }
         return emptyList()
+    }
+
+    /** First two segments of the application id (`com.acme.app.qa` → `com.acme`): the app's package root. */
+    fun packageRoot(packageName: String?): String? =
+        packageName?.split('.')?.filter { it.isNotEmpty() }?.takeIf { it.size >= 2 }?.take(2)?.joinToString(".")
+
+    /** Outer `R` class names of the app's own modules among dex [classNames], e.g. `com.acme.feature.auth.R`. */
+    fun moduleRClassNames(classNames: Sequence<String>, root: String): List<String> =
+        classNames
+            .filter { name -> name.startsWith("$root.") && TYPES.any { name.endsWith(".R\$$it") } }
+            .map { it.substringBeforeLast('$') }
+            .distinct()
+            .sorted()
+            .toList()
+
+    /**
+     * Every module R class of the app, found by listing the installed APK's dex classes. Draft mode
+     * only (debug builds, background thread). `DexFile` is deprecated but still the only way to list
+     * an APK's classes; any failure just yields an empty list.
+     */
+    @Suppress("DEPRECATION")
+    fun discoverModuleRClasses(context: Context): List<Class<*>> {
+        val root = packageRoot(context.packageName) ?: return emptyList()
+        val info = context.applicationInfo ?: return emptyList()
+        val apks = listOfNotNull(info.sourceDir) + info.splitSourceDirs.orEmpty()
+        val names = ArrayList<String>()
+        for (apk in apks) {
+            try {
+                val dex = dalvik.system.DexFile(apk)
+                try {
+                    val entries = dex.entries()
+                    while (entries.hasMoreElements()) names += entries.nextElement()
+                } finally {
+                    dex.close()
+                }
+            } catch (t: Throwable) {
+                Logger.w("Could not list classes of $apk for R discovery", t)
+            }
+        }
+        return moduleRClassNames(names.asSequence(), root).mapNotNull { loadClass(it, context.classLoader) }
     }
 
     /** `R$<type>` nested in [rClass], or null. */

@@ -11,10 +11,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * de-duplicated per process, debounced ~5 s, POSTed in background batches of at most 500.
  * Default values are computed lazily on the background thread.
  *
- * Only the app's own keys are reported: names on the library denylist / app exclusions
- * ([KeyFilter]) are dropped immediately, and at flush time (background thread) keys that are not
- * in the app's R classes ([Engine.ownedKeyNames]) are dropped too — so ExoPlayer/Material strings
- * shown on screen never reach the project.
+ * Library strings (AppCompat, Material, Compose, ExoPlayer, Firebase…) and app exclusions are
+ * dropped via [KeyFilter]. Keys are deliberately NOT checked against the scanned R classes: a
+ * module missing from `rClasses` (or discovery) must still be able to report its keys.
  */
 internal class MissingKeyReporter(private val engine: Engine) {
 
@@ -41,13 +40,12 @@ internal class MissingKeyReporter(private val engine: Engine) {
 
     private fun flush() {
         if (engine.state.manifest == null) return // language unknown yet; re-scheduled after the next manifest
-        val owned = engine.ownedKeyNames()
         val batch = ArrayList<Pair<String, Value>>()
         for (key in pending.keys.toList()) {
             val provider = pending.remove(key) ?: continue
             if (!engine.isMissingFromBase(key)) continue
-            if (!isReportable(key, owned, engine.keyFilter)) {
-                Logger.d("Key '$key' is not one of the app's own strings; not reported")
+            if (!isReportable(key, engine.keyFilter)) {
+                Logger.d("Key '$key' is a library or excluded string; not reported")
                 continue
             }
             val value = try {
@@ -83,11 +81,7 @@ internal class MissingKeyReporter(private val engine: Engine) {
         const val DEBOUNCE_MS = 5_000L
         const val MAX_BATCH = LocalUploader.MAX_BATCH
 
-        /**
-         * True if [key] may be reported: not excluded by [filter] and, when the app's owned key set
-         * could be computed ([owned] non-null), part of it.
-         */
-        fun isReportable(key: String, owned: Set<String>?, filter: KeyFilter): Boolean =
-            !filter.isExcluded(key) && (owned == null || key in owned)
+        /** True if [key] may be reported: not a library string and not excluded by the app. */
+        fun isReportable(key: String, filter: KeyFilter): Boolean = !filter.isExcluded(key)
     }
 }

@@ -36,7 +36,7 @@ The SDK is published to Maven Central as `app.stringcast:stringcast-android`
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("app.stringcast:stringcast-android:0.1.1")
+    implementation("app.stringcast:stringcast-android:0.1.2")
 }
 ```
 
@@ -45,7 +45,7 @@ Or from JitPack (tags of this repository):
 ```kotlin
 // settings.gradle.kts → dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
 dependencies {
-    implementation("com.github.StringCast:stringcast-android:v0.1.1")
+    implementation("com.github.StringCast:stringcast-android:v0.1.2")
 }
 ```
 
@@ -205,7 +205,7 @@ connected (contract §4.2):
 | `X-StringCast-Platform` | `android` |
 | `X-StringCast-App-Id` | your package name (`context.packageName`) |
 | `X-StringCast-App-Version` | your `versionName` |
-| `X-StringCast-SDK-Version` | SDK version (`BuildConfig.SDK_VERSION`, e.g. `0.1.1`) |
+| `X-StringCast-SDK-Version` | SDK version (`BuildConfig.SDK_VERSION`, e.g. `0.1.2`) |
 | `X-StringCast-Language` | the language the SDK resolved for this device, e.g. `es` |
 
 No device IDs, advertising IDs, user identifiers or other personal data are sent. Empty values are
@@ -256,10 +256,13 @@ StringCast.uploadLocalStrings { result ->
 
 Keys are enumerated by reflection over the app's `R.string`, `R.plurals` and `R.array`:
 
-- **Single-module apps**: nothing to configure — the SDK finds `<applicationId>.R` (and its parent
-  packages, so `com.acme.app.qa` → `com.acme.app.R`).
-- **Multi-module apps**: with AGP 8's default non-transitive R classes every module has its own
-  `R`, so list the modules that contain strings:
+- **Nothing to configure (default)**: the SDK finds `<applicationId>.R` (and its parent packages, so
+  `com.acme.app.qa` → `com.acme.app.R`) **and every module `R` in the app's own package root**, by
+  listing the APK's classes in the background: `com.acme.feature.auth.R`, `com.acme.core.ui.R`, …
+  Library R classes (`androidx.*`, `com.google.*`, …) are outside the root and ignored. The
+  `StringCast` Logcat tag prints the discovered classes when `logging = true`.
+- **Explicit list** (overrides discovery): use it when a module lives outside the app's package root
+  (e.g. app `com.acme.app`, shared module `org.partner.ui`), or to limit the upload:
 
   ```kotlin
   StringCastConfig(
@@ -288,9 +291,10 @@ runtime); their "translations" equal base and are skipped.
 
 Strings the app requests that are not in the base bundle are collected, debounced (~5 s) and
 POSTed to `/missing` in batches of ≤ 500, with the value from the app's base-language resources.
-The same ownership rules apply: only keys in the app's R classes (above) that are not excluded
-are reported, so ExoPlayer/Material strings shown on screen never reach the project. Keys without
-a local value are not reported.
+Library strings (the built-in list above) and your `excludedKeys` / `excludedKeyPrefixes` are never
+reported, so ExoPlayer/Material strings shown on screen don't reach the project. Any other key is
+reported — including keys from a module the R-class scan didn't cover. Keys without a local value
+are not reported.
 
 ## Uploading strings at build time (CLI)
 
